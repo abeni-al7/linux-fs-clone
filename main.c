@@ -64,6 +64,8 @@ void cmd_ls(const char* path);
 void cmd_tree(const char* path, int indent);
 void cmd_read(const char* path);
 void cmd_detail(const char* path);
+void cmd_rm(const char* path);
+void cmd_rmdir(const char* path);
 
 // Function prototypes
 void initialize_fs();
@@ -76,6 +78,62 @@ void create_dir(const char* name);
 void list_directory(const char* path);
 void print_inode_info(int inum);
 void print_fs_info();
+
+// Helper to remove a file
+void remove_file(int inum, int parent) {
+    struct inode *f = &inodes[inum];
+    // Free data blocks
+    for (int i = 0; i < f->block_count; i++) {
+        int b = f->blocks[i];
+        data_blocks[b][0] = 0;
+        sb.free_blocks++;
+    }
+    // Free inode
+    inodes[inum].inum = -1;
+    sb.free_inodes++;
+    // Remove entry from parent directory
+    struct directory *dir = &directories[parent];
+    for (int i = 0; i < dir->count; i++) {
+        if (dir->entries[i].inum == inum) {
+            for (int j = i; j < dir->count - 1; j++)
+                dir->entries[j] = dir->entries[j+1];
+            dir->count--;
+            break;
+        }
+    }
+}
+
+// Helper to remove a directory recursively
+void remove_dir(int inum) {
+    struct directory *dir = &directories[inum];
+    // Recursively remove entries
+    for (int i = 0; i < dir->count; ) {
+        int child = dir->entries[i].inum;
+        char *name = dir->entries[i].name;
+        if (!strcmp(name, ".") || !strcmp(name, "..")) { i++; continue; }
+        if (inodes[child].type == TYPE_DIR) {
+            remove_dir(child);
+        } else {
+            remove_file(child, inum);
+        }
+        // After removal, entries shift, do not increment i to reprocess at same index
+    }
+    // Free this directory inode
+    int parent = dir->entries[1].inum; // ".."
+    inodes[inum].inum = -1;
+    sb.free_inodes++;
+    dir->count = 0;
+    // Remove entry from parent directory
+    struct directory *pdir = &directories[parent];
+    for (int i = 0; i < pdir->count; i++) {
+        if (pdir->entries[i].inum == inum) {
+            for (int j = i; j < pdir->count - 1; j++)
+                pdir->entries[j] = pdir->entries[j+1];
+            pdir->count--;
+            break;
+        }
+    }
+}
 
 int main() {
     initialize_fs();
@@ -90,6 +148,8 @@ int main() {
         else if (!strcmp(cmd,"tree")) cmd_tree(cnt>1?arg:"/",0);
         else if (!strcmp(cmd,"read")) cmd_read(arg);
         else if (!strcmp(cmd,"detail")) cmd_detail(arg);
+        else if (!strcmp(cmd,"rm")) cmd_rm(arg);
+        else if (!strcmp(cmd,"rmdir")) cmd_rmdir(arg);
         else if (!strcmp(cmd,"exit")) break;
         else printf("Unknown command\n");
     }
@@ -229,6 +289,32 @@ void cmd_detail(const char* path) {
     int inum = traverse_path(path);
     if (inum < 0) { printf("No such file or dir: %s\n", path); return; }
     print_inode_info(inum);
+}
+void cmd_rm(const char* path) {
+    char buf[1024]; strncpy(buf, path, sizeof(buf));
+    char *base = strrchr(buf, '/');
+    int parent = sb.root_inode;
+    char fname[MAX_NAME_LEN];
+    if (base) { *base = '\0'; parent = traverse_path(buf); strncpy(fname, base+1, MAX_NAME_LEN); }
+    else strncpy(fname, path, MAX_NAME_LEN);
+    if (parent < 0) { printf("Invalid path\n"); return; }
+    int inum = traverse_path(path);
+    if (inum < 0 || inodes[inum].type != TYPE_FILE) {
+        printf("Cannot remove file: %s\n", path);
+        return;
+    }
+    remove_file(inum, parent);
+    printf("Removed file '%s'\n", path);
+}
+void cmd_rmdir(const char* path) {
+    int inum = traverse_path(path);
+    if (inum < 0 || inodes[inum].type != TYPE_DIR) {
+        printf("Cannot remove directory: %s\n", path);
+        return;
+    }
+    if (inum == sb.root_inode) { printf("Cannot remove root directory\n"); return; }
+    remove_dir(inum);
+    printf("Removed directory '%s'\n", path);
 }
 
 // Modify create_file for nested support
