@@ -10,11 +10,8 @@
 #define MAX_BLOCKS_PER_FILE 8
 #define MAX_NAME_LEN 32
 
-// File types
 #define TYPE_FILE 1
 #define TYPE_DIR 2
-
-// Superblock structure
 struct superblock {
     int num_blocks;
     int block_size;
@@ -24,7 +21,6 @@ struct superblock {
     int root_inode;
 };
 
-// Inode structure
 struct inode {
     int inum;
     int type;
@@ -35,31 +31,27 @@ struct inode {
     int block_count;
 };
 
-// Directory entry structure
 struct dirent {
     int inum;
     char name[MAX_NAME_LEN];
 };
 
-// Directory structure
+
 struct directory {
     struct dirent entries[MAX_FILES];
     int count;
 };
 
-// File system structures
 struct superblock sb;
 struct inode inodes[NUM_INODES];
 char data_blocks[NUM_BLOCKS][BLOCK_SIZE];
 struct directory root_dir;
 
-// Add directories array to track entries per inode (nested support)
 struct directory directories[NUM_INODES];
-// Current working directory state
+
 int cwd_inode;
 char cwd_path[1024];
 
-// Path traversal and CLI command prototypes
 int traverse_path(const char* path);
 void cmd_touch(const char* path);
 void cmd_mkdir(const char* path);
@@ -72,7 +64,6 @@ void cmd_rmdir(const char* path);
 void cmd_cd(const char* path);
 void cmd_pwd();
 
-// Function prototypes
 void initialize_fs();
 int create_inode(int type);
 int allocate_block();
@@ -84,7 +75,6 @@ void list_directory(const char* path);
 void print_inode_info(int inum);
 void print_fs_info();
 
-// Helper to remove a file
 void remove_file(int inum, int parent) {
     struct inode *f = &inodes[inum];
     // Free data blocks
@@ -108,7 +98,6 @@ void remove_file(int inum, int parent) {
     }
 }
 
-// Helper to remove a directory recursively
 void remove_dir(int inum) {
     struct directory *dir = &directories[inum];
     // Recursively remove entries
@@ -121,7 +110,6 @@ void remove_dir(int inum) {
         } else {
             remove_file(child, inum);
         }
-        // After removal, entries shift, do not increment i to reprocess at same index
     }
     // Free this directory inode
     int parent = dir->entries[1].inum; // ".."
@@ -180,9 +168,7 @@ void initialize_fs() {
     // Initialize root directory
     root_dir.count = 0;
     create_root();
-    // Store root directory
     directories[sb.root_inode] = root_dir;
-    // Initialize current working directory
     cwd_inode = sb.root_inode;
     strcpy(cwd_path, "/");
 }
@@ -229,18 +215,15 @@ int allocate_block() {
     return -1;
 }
 
-// Traverse a POSIX path, return inode or -1
 int traverse_path(const char* path) {
     int curr;
     char buf[1024];
-    // Determine starting point: absolute vs relative
+
     if (path[0] == '/') {
-        // Absolute path
         if (strcmp(path, "/") == 0) return sb.root_inode;
         curr = sb.root_inode;
         strncpy(buf, path + 1, sizeof(buf));
     } else {
-        // Relative path
         curr = cwd_inode;
         strncpy(buf, path, sizeof(buf));
     }
@@ -262,7 +245,6 @@ int traverse_path(const char* path) {
     return curr;
 }
 
-// CLI command implementations
 void cmd_touch(const char* path) {
     printf("Enter content (end with empty line):\n");
     char content[4096] = {0};
@@ -285,7 +267,6 @@ void cmd_tree(const char* path, int indent) {
     if (inum < 0 || inodes[inum].type != TYPE_DIR) return;
     struct directory* dir = &directories[inum];
     for (int i = 0; i < dir->count; i++) {
-        // skip . and ..
         if (!strcmp(dir->entries[i].name, ".") || !strcmp(dir->entries[i].name, "..")) continue;
         for (int j = 0; j < indent; j++) printf("  ");
         printf("%s\n", dir->entries[i].name);
@@ -338,7 +319,6 @@ void cmd_rmdir(const char* path) {
     printf("Removed directory '%s'\n", path);
 }
 
-// Change current directory
 void cmd_cd(const char* path) {
     int inum = traverse_path(path);
     if (inum < 0 || inodes[inum].type != TYPE_DIR) {
@@ -371,12 +351,10 @@ void cmd_cd(const char* path) {
     }
 }
 
-// Print current working directory
 void cmd_pwd() {
     printf("%s\n", cwd_path);
 }
 
-// Modify create_file for nested support
 void create_file(const char* name, const char* content) {
     char pathbuf[1024]; strncpy(pathbuf, name, sizeof(pathbuf));
     char* base = strrchr(pathbuf, '/'); int parent = (base ? sb.root_inode : cwd_inode);
@@ -414,13 +392,11 @@ void create_file(const char* name, const char* content) {
     }
     
     inodes[file_inum].mtime = time(NULL);
-    // add to directory array
     struct dirent new_entry = {file_inum, ""}; strncpy(new_entry.name, fname, MAX_NAME_LEN);
     directories[parent].entries[directories[parent].count++] = new_entry;
     printf("Created file '%s'\n", name);
 }
 
-// Modify create_dir for nested support
 void create_dir(const char* name) {
     char pathbuf[1024]; strncpy(pathbuf, name, sizeof(pathbuf));
     char* base = strrchr(pathbuf, '/'); int parent = cwd_inode;
