@@ -8,12 +8,17 @@ This project implements a basic interactive command-line filesystem simulation i
 *   **Hierarchical Directory Structure:** Supports creating directories within other directories (nested directories).
 *   **File Creation with Content:** The `touch` command allows interactive input of multi-line content for new files.
 *   **Directory and File Operations:**
-    *   `touch <path>`: Creates a new file at the specified path. Prompts for content interactively.
-    *   `mkdir <path>`: Creates a new directory at the specified path.
-    *   `ls [path]`: Lists the contents (files and directories) of the specified path. Defaults to the root directory (`/`) if no path is provided.
-    *   `tree [path]`: Displays a tree-like structure of files and directories starting from the specified path. Defaults to the root directory (`/`) if no path is provided.
-    *   `read <path>`: Displays the content of the specified file.
-    *   `detail <path>`: Shows detailed inode information for the specified file or directory, including type, size, creation/modification times, and data block locations.
+    *   `touch <path>`: Creates a new file at the specified path. Prompts for content interactively. If path is not absolute, it's relative to the current working directory.
+    *   `mkdir <path>`: Creates a new directory at the specified path. If path is not absolute, it's relative to the current working directory.
+    *   `ls [path]`: Lists the contents (files and directories) of the specified path. Defaults to the current working directory if no path is provided.
+    *   `tree [path]`: Displays a tree-like structure of files and directories starting from the specified path. Defaults to the current working directory if no path is provided.
+    *   `read <path>`: Displays the content of the specified file. If path is not absolute, it's relative to the current working directory.
+    *   `detail <path>`: Shows detailed inode information for the specified file or directory, including type, size, creation/modification times, and data block locations. If path is not absolute, it's relative to the current working directory.
+    *   `cd <path>`: Changes the current working directory to the specified path. Supports relative (`.`, `..`) and absolute paths.
+    *   `pwd`: Prints the current working directory path.
+    *   `rm <path>`: Removes the specified file. If path is not absolute, it's relative to the current working directory.
+    *   `rmdir <path>`: Removes the specified directory and its contents recursively. If path is not absolute, it's relative to the current working directory.
+*   **Current Working Directory:** The shell maintains a current working directory, and commands operate relative to this directory unless an absolute path is given.
 *   **In-Memory Simulation:** The entire filesystem (superblock, inodes, data blocks, directory structures) is simulated in memory and is lost when the program exits.
 *   **Basic Filesystem Primitives:**
     *   Superblock: Manages overall filesystem metadata.
@@ -44,21 +49,28 @@ fs> mkdir documents
 Created directory 'documents'
 fs> mkdir documents/reports
 Created directory 'documents/reports'
-fs> touch documents/reports/annual_q1.txt
+fs> cd documents
+fs> pwd
+/documents
+fs> touch reports/annual_q1.txt
 Enter content (end with empty line):
 This is the Q1 annual report.
 It contains important financial data.
 
-Created file 'documents/reports/annual_q1.txt'
-fs> ls /
-documents
-.
-..
-fs> ls documents
+Created file 'reports/annual_q1.txt'
+fs> ls
 reports
 .
 ..
-fs> tree /
+fs> cd reports
+fs> pwd
+/documents/reports
+fs> ls
+annual_q1.txt
+.
+..
+fs> cd /
+fs> tree
 documents
   reports
     annual_q1.txt
@@ -74,9 +86,16 @@ fs> detail documents/reports/annual_q1.txt
 Inode number: 3
 Type: File
 Size: 60 bytes
-Created: Fri Jun  6 HH:MM:SS YYYY
-Modified: Fri Jun  6 HH:MM:SS YYYY
+Created: Sat Jun 08 HH:MM:SS 2025
+Modified: Sat Jun 08 HH:MM:SS 2025
 Data blocks: 0 
+fs> rm documents/reports/annual_q1.txt
+Removed file 'documents/reports/annual_q1.txt'
+fs> rmdir documents/reports
+Removed directory 'documents/reports'
+fs> ls documents
+.
+..
 fs> exit
 ```
 
@@ -101,14 +120,15 @@ fs> exit
 *   **Global Arrays:**
     *   `inodes[]`: Array holding all inode structures.
     *   `directories[]`: Array holding the directory structure for each inode that is a directory. This enables nested directory support.
+    *   `cwd_inode`: Integer storing the inode number of the current working directory.
+    *   `cwd_path[]`: Character array storing the string path of the current working directory.
 
 ## Limitations
 
 *   **In-Memory:** The filesystem is not persistent. All data is lost when the program terminates.
 *   **Fixed Sizes:** The number of inodes, blocks, maximum files per directory, maximum blocks per file, and maximum name length are defined by macros and are fixed at compile time.
 *   **No Permissions:** Does not implement file/directory permissions.
-*   **No Deletion:** Does not currently support `rm` or `rmdir` commands.
-*   **Limited Path Resolution:** Path traversal is basic and assumes well-formed paths.
+*   **Limited Path Resolution:** Path traversal is basic and assumes well-formed paths. While `cd` handles `.` and `..`, complex relative paths might not be fully robust.
 *   **Error Handling:** Error handling is basic (e.g., "No free inodes", "Invalid path").
 *   **Single User:** Designed for a single interactive session.
 *   **Block Allocation:** `allocate_block` simply marks the first byte of a block as used, which is a very simplistic way to track usage.
