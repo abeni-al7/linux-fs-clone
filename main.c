@@ -55,6 +55,9 @@ struct directory root_dir;
 
 // Add directories array to track entries per inode (nested support)
 struct directory directories[NUM_INODES];
+// Current working directory state
+int cwd_inode;
+char cwd_path[1024];
 
 // Path traversal and CLI command prototypes
 int traverse_path(const char* path);
@@ -66,6 +69,8 @@ void cmd_read(const char* path);
 void cmd_detail(const char* path);
 void cmd_rm(const char* path);
 void cmd_rmdir(const char* path);
+void cmd_cd(const char* path);
+void cmd_pwd();
 
 // Function prototypes
 void initialize_fs();
@@ -144,12 +149,14 @@ int main() {
         if (cnt<1) continue;
         if (!strcmp(cmd,"touch")) cmd_touch(arg);
         else if (!strcmp(cmd,"mkdir")) cmd_mkdir(arg);
-        else if (!strcmp(cmd,"ls")) cmd_ls(cnt>1?arg:"/");
-        else if (!strcmp(cmd,"tree")) cmd_tree(cnt>1?arg:"/",0);
+        else if (!strcmp(cmd,"ls")) cmd_ls(cnt>1?arg:".");
+        else if (!strcmp(cmd,"tree")) cmd_tree(cnt>1?arg:".",0);
         else if (!strcmp(cmd,"read")) cmd_read(arg);
         else if (!strcmp(cmd,"detail")) cmd_detail(arg);
         else if (!strcmp(cmd,"rm")) cmd_rm(arg);
         else if (!strcmp(cmd,"rmdir")) cmd_rmdir(arg);
+        else if (!strcmp(cmd,"cd")) cmd_cd(arg);
+        else if (!strcmp(cmd,"pwd")) cmd_pwd();
         else if (!strcmp(cmd,"exit")) break;
         else printf("Unknown command\n");
     }
@@ -175,6 +182,9 @@ void initialize_fs() {
     create_root();
     // Store root directory
     directories[sb.root_inode] = root_dir;
+    // Initialize current working directory
+    cwd_inode = sb.root_inode;
+    strcpy(cwd_path, "/");
 }
 
 void create_root() {
@@ -221,10 +231,21 @@ int allocate_block() {
 
 // Traverse a POSIX path, return inode or -1
 int traverse_path(const char* path) {
-    if (strcmp(path, "/") == 0) return sb.root_inode;
-    char buf[1024]; strncpy(buf, path, sizeof(buf));
+    int curr;
+    char buf[1024];
+    // Determine starting point: absolute vs relative
+    if (path[0] == '/') {
+        // Absolute path
+        if (strcmp(path, "/") == 0) return sb.root_inode;
+        curr = sb.root_inode;
+        strncpy(buf, path + 1, sizeof(buf));
+    } else {
+        // Relative path
+        curr = cwd_inode;
+        strncpy(buf, path, sizeof(buf));
+    }
     char* token = strtok(buf, "/");
-    int curr = sb.root_inode;
+    if (!token) return curr;
     while (token) {
         struct directory* dir = &directories[curr];
         int found = -1;
@@ -254,13 +275,13 @@ void cmd_touch(const char* path) {
 }
 void cmd_mkdir(const char* path) { create_dir(path); }
 void cmd_ls(const char* path) {
-    int inum = traverse_path(path);
+    int inum = traverse_path(path[0] ? path : cwd_path);
     if (inum < 0 || inodes[inum].type != TYPE_DIR) { printf("No such directory: %s\n", path); return; }
     struct directory* dir = &directories[inum];
     for (int i = 0; i < dir->count; i++) printf("%s\n", dir->entries[i].name);
 }
 void cmd_tree(const char* path, int indent) {
-    int inum = traverse_path(path);
+    int inum = traverse_path(path[0] ? path : cwd_path);
     if (inum < 0 || inodes[inum].type != TYPE_DIR) return;
     struct directory* dir = &directories[inum];
     for (int i = 0; i < dir->count; i++) {
@@ -293,7 +314,7 @@ void cmd_detail(const char* path) {
 void cmd_rm(const char* path) {
     char buf[1024]; strncpy(buf, path, sizeof(buf));
     char *base = strrchr(buf, '/');
-    int parent = sb.root_inode;
+    int parent = cwd_inode;
     char fname[MAX_NAME_LEN];
     if (base) { *base = '\0'; parent = traverse_path(buf); strncpy(fname, base+1, MAX_NAME_LEN); }
     else strncpy(fname, path, MAX_NAME_LEN);
@@ -317,10 +338,48 @@ void cmd_rmdir(const char* path) {
     printf("Removed directory '%s'\n", path);
 }
 
+// Change current directory
+void cmd_cd(const char* path) {
+    int inum = traverse_path(path);
+    if (inum < 0 || inodes[inum].type != TYPE_DIR) {
+        printf("No such directory: %s\n", path);
+        return;
+    }
+    cwd_inode = inum;
+    // Update cwd_path
+    if (path[0] == '/') {
+        strncpy(cwd_path, path, sizeof(cwd_path));
+    } else {
+        if (strcmp(path, ".") == 0) {
+            // stay
+        } else if (strcmp(path, "..") == 0) {
+            if (strcmp(cwd_path, "/") != 0) {
+                char* p = strrchr(cwd_path, '/');
+                if (p) {
+                    if (p == cwd_path) cwd_path[1] = '\0';
+                    else *p = '\0';
+                }
+            }
+        } else {
+            if (strcmp(cwd_path, "/") == 0) {
+                snprintf(cwd_path, sizeof(cwd_path), "/%s", path);
+            } else {
+                strncat(cwd_path, "/", sizeof(cwd_path) - strlen(cwd_path) - 1);
+                strncat(cwd_path, path, sizeof(cwd_path) - strlen(cwd_path) - 1);
+            }
+        }
+    }
+}
+
+// Print current working directory
+void cmd_pwd() {
+    printf("%s\n", cwd_path);
+}
+
 // Modify create_file for nested support
 void create_file(const char* name, const char* content) {
     char pathbuf[1024]; strncpy(pathbuf, name, sizeof(pathbuf));
-    char* base = strrchr(pathbuf, '/'); int parent = sb.root_inode;
+    char* base = strrchr(pathbuf, '/'); int parent = (base ? sb.root_inode : cwd_inode);
     char fname[MAX_NAME_LEN];
     if (base) { *base='\0'; parent = traverse_path(pathbuf); strncpy(fname, base+1, MAX_NAME_LEN); }
     else strncpy(fname, name, MAX_NAME_LEN);
@@ -364,7 +423,7 @@ void create_file(const char* name, const char* content) {
 // Modify create_dir for nested support
 void create_dir(const char* name) {
     char pathbuf[1024]; strncpy(pathbuf, name, sizeof(pathbuf));
-    char* base = strrchr(pathbuf, '/'); int parent = sb.root_inode;
+    char* base = strrchr(pathbuf, '/'); int parent = cwd_inode;
     char dname[MAX_NAME_LEN];
     if (base) { *base='\0'; parent = traverse_path(pathbuf); strncpy(dname, base+1, MAX_NAME_LEN); }
     else strncpy(dname, name, MAX_NAME_LEN);
